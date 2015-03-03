@@ -1,0 +1,23 @@
+#source: pull-lp-source libxcb trusty && mv libxcb-* source && rm -rf libxcb_*
+#target: https://github.com/minos-org/libxcb-backport
+#description: trusty -> precise, required by i3 >= 4.9
+diff -Naur source/debian/changelog target/debian/changelog
+--- source/debian/changelog	2015-03-01 06:48:49.000000000 -0600
++++ target/debian/changelog	2015-03-01 04:05:27.948176705 -0600
+@@ -1,4 +1,4 @@
+-libxcb (1.10-2ubuntu1) trusty; urgency=low
++libxcb (1.10-2ubuntu1) precise; urgency=low
+ 
+   [ Dmitry Shachnev ]
+   * Merge with unreleased debian unstable, remaining changes:
+diff -Naur source/debian/control target/debian/control
+--- source/debian/control	2015-03-01 06:48:49.000000000 -0600
++++ target/debian/control	2015-03-01 04:06:44.429220560 -0600
+@@ -8,7 +8,6 @@
+  libxau-dev (>= 1:1.0.5-2),
+  libxdmcp-dev (>= 1:1.0.3-2),
+  xcb-proto (>= 1.10),
+- xcb-proto (<< 2.0),
+  libpthread-stubs0-dev (>= 0.1),
+  debhelper (>= 8.9.4~),
+  pkg-config,
