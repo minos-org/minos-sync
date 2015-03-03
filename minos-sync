@@ -13,6 +13,7 @@ _recipe_layout()
     recipe="$(basename "${bdir}" .tmp)"
     source="$(awk '/^#source/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
     target="$(awk '/^#target/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
+    target="$(printf "%s" "${target}"|awk '{sub(/http:|https:/,"git:");sub(/:\/\//,"@");sub(/github.com\//,"github.com:");print}')"
     description="$(awk '/^#description/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
     exe="$(awk '/^#exec/ {print; exit}' RECIPE|cut -d":" -f2|awk '{sub(/^[ \t]+/, ""); print}')"
 
@@ -28,8 +29,7 @@ _recipe_layout()
             if [ -d "${bdir}"/source ]; then
                 (cd "${bdir}"/source && git pull)
             else
-                (cd "${bdir}" && \
-                git clone "$(printf "%s" "${source}" | awk '{sub(/http:|https:/,"git:");print}')" source)
+                (cd "${bdir}" && git clone "${source}" source)
             fi
             ;;
         *)
@@ -50,8 +50,7 @@ _recipe_layout()
         if [ -z "${target}" ]; then
             mkdir "${bdir}"/target
         else
-            (cd "${bdir}" && \
-            git clone "$(printf "%s" "${target}" | awk '{sub(/http:|https:/,"git:");print}')" target || true)
+            (cd "${bdir}" && git clone "${target}" target || true)
             [ -d "${bdir}"/target/.git ] && (cd "${bdir}"/target && git rm -rf *) || mkdir "${bdir}"/target
         fi
     fi
@@ -147,8 +146,8 @@ _recipe_layout()
         (cd "${bdir}"/target && git init && git add * && \
         git remote add origin "$(printf "%s" "${target}" | awk '{sub(/http:|https:/,"git:");print}')")
     if ! (cd "${bdir}"/target && git status | grep -q "nothing to commit"); then
-        git commit -m "automatic sync $(date +%d-%m-%Y:%H:%M)"
-        git push -u origin master
+        (cd "${bdir}"/target && git commit -m "automatic sync $(date +%d-%m-%Y:%H:%M)")
+        (cd "${bdir}"/target && git push -u origin master)
     fi
 EOF
 }
