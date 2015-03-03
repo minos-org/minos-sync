@@ -1,0 +1,3 @@
+#source: connman.source
+#target: https://github.com/minos-org/connman
+#description: connman stable

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -ex
+
+[ -d deb ] && (cd deb; git pull) || git clone git@github.com:minos-org/connman-deb deb
+(cd deb && uscan --watchfile debian/watch --upstream-version 0.1 --destdir=../)
+for archive in $(find . -name "connman-*.tar.xz"); do
+    xzcat < "${archive}" | tar xf -
+done
+rm -rf source; mv connman-*.*/ source
+
+# vim: set ts=8 sw=4 tw=0 ft=sh :

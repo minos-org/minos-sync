@@ -1,0 +1,203 @@
+#!/bin/sh
+
+PS4="> "
+progname="$(basename ${0})"
+bdir="$(cd "$(dirname "${0}")" && pwd)"
+alert_mails="m#%#javier.io"
+
+_recipe_layout()
+{
+    [ -z "${1}" ] && return 1
+    cat > "${1}" << 'EOF'
+    bdir="$(cd "$(dirname "${0}")" && pwd)"
+    recipe="$(basename "${bdir}" .tmp)"
+    source="$(awk '/^#source/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
+    target="$(awk '/^#target/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
+    description="$(awk '/^#description/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
+    exe="$(awk '/^#exec/ {print; exit}' RECIPE|cut -d":" -f2|awk '{sub(/^[ \t]+/, ""); print}')"
+
+    case "${source}" in
+        lp:*)
+            if [ -d "${bdir}"/source ]; then
+                (cd "${bdir}"/source && bzr pull)
+            else
+                (cd "${bdir}" && bzr branch "${source}" source)
+            fi
+            ;;
+        *github.com*)
+            if [ -d "${bdir}"/source ]; then
+                (cd "${bdir}"/source && git pull)
+            else
+                (cd "${bdir}" && \
+                git clone "$(printf "%s" "${source}" | awk '{sub(/http:|https:/,"git:");print}')" source)
+            fi
+            ;;
+        *)
+            [ -z "${source}" ] && exit 1
+            if [ -f "${bdir}"/../"${source}" ]; then
+                chmod +x "${bdir}"/../"${source}"
+                (cd "${bdir}" && "${bdir}"/../"${source}")
+            else
+                (cd "${bdir}" && eval ${source})
+            fi
+            ;;
+    esac
+
+    if [ -d "${bdir}"/target/.git ]; then
+        (cd "${bdir}"/target && git pull)
+        (cd "${bdir}"/target && git rm -rf *)
+    else
+        if [ -z "${target}" ]; then
+            mkdir "${bdir}"/target
+        else
+            (cd "${bdir}" && \
+            git clone "$(printf "%s" "${target}" | awk '{sub(/http:|https:/,"git:");print}')" target || true)
+            [ -d "${bdir}"/target/.git ] && (cd "${bdir}"/target && git rm -rf *) || mkdir "${bdir}"/target
+        fi
+    fi
+
+    cp -rf "${bdir}"/source/* "${bdir}"/target/
+
+    if [ -f "${bdir}"/../"${exe}" ]; then
+        chmod +x "${bdir}"/../"${exe}"
+        (cd "${bdir}" && "${bdir}"/../"${exe}")
+    elif [ "${exe}" ]; then
+        (cd "${bdir}" && eval ${exe})
+    fi
+
+    (cd "${bdir}" && awk '!/^#/' ../"${recipe}" > recipe.patch)
+    (cd "${bdir}"/target/ && patch -p1 < ../recipe.patch)
+
+    if [ ! -f "${bdir}"/target/README.md ]; then
+        readme="${bdir}"/target/README.md
+        printf "%s\\n" "## About"  > "${readme}"
+        printf "\\n"              >> "${readme}"
+
+        case "${recipe}" in
+            *.upstream)
+        printf "%s " "This is an auto-generated mirror for upstream" >> "${readme}"
+        printf "%s " "projects who either don't use git or include"  >> "${readme}"
+        printf "%s " "a debian/ directory in their master" >> "${readme}"
+        printf "%s " "branch (removed by autobot)."        >> "${readme}"
+        printf "%s " "The former is quite problematic for launchpad" >> "${readme}"
+        printf "%s " "autobuilds due to limitations in bzr dailydeb" >> "${readme}"
+        printf "%s " "(LP#[617653](https://bugs.launchpad.net/bzr-builder/+bug/617653),"    >> "${readme}"
+        printf "%s"  "LP #[1390746](https://bugs.launchpad.net/bzr-builder/+bug/1390746))." >> "${readme}"
+        printf "\\n\\n" >> "${readme}"
+        printf "%s " "This repository is used as a base to build the ${recipe%%.*}" >> "${readme}"
+        printf "%s " "version shipped with minos. In some cases additional patches" >> "${readme}"
+        printf "%s " "are applied on top to generate the final result. See"         >> "${readme}"
+        printf "%s " "https://github.com/minos-org/${recipe%%.*}-deb/tree/master/debian/patches" >> "${readme}"
+        printf "%s"  "(if applicable) to understand them." >> "${readme}"
+        printf "\\n\\n" >> "${readme}"
+        printf "%s " "Most of the time packages will follow upstream name conventions," >> "${readme}"
+        printf "%s " "in that case, the following instructions should help to install"  >> "${readme}"
+        printf "%s"  "this program with minos sauce in your system." >> "${readme}"
+        printf "\\n\\n" >> "${readme}"
+                ;;
+
+            *.backport)
+        printf "%s " "This is an auto-generated backport for the" >> "${readme}"
+        printf "%s " "minos project (${description}). It's generated automatically" >> "${readme}"
+        printf "%s"  "to take advantage of upstream (Ubuntu) security updates."     >> "${readme}"
+        printf "\\n\\n" >> "${readme}"
+                ;;
+
+            *.deviation)
+        printf "%s " "This is an auto-generated deviation for the" >> "${readme}"
+        printf "%s " "minos project (${description}). It's generated automatically" >> "${readme}"
+        printf "%s"  "to take advantage of upstream (Ubuntu) security updates."     >> "${readme}"
+        printf "\\n\\n" >> "${readme}"
+                ;;
+        esac
+
+        printf "%s\\n" "## Quick start"  >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" "### Only LTS versions" >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" "1. Set up the minos archive:" >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" '   ```' >> "${readme}"
+        printf "%s\\n" "   $ sudo add-apt-repository ppa:minos-archive/main" >> "${readme}"
+        printf "%s\\n" '   ```' >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" "2. Install:" >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" '   ```' >> "${readme}"
+        printf "%s\\n" "   $ sudo apt-get update && sudo apt-get install ${recipe%%.*}" >> "${readme}"
+        printf "%s\\n" '   ```' >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" "3. Enjoy ☺!" >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s\\n" "## Feedback" >> "${readme}"
+        printf "\\n"   >> "${readme}"
+        printf "%s " "Please drop me an [email](mailto:j@minos.io) with your suggestions or" >> "${readme}"
+
+        case "${recipe}" in
+            *.upstream)
+        printf "%s " "open [an issue](https://github.com/minos-org/${recipe%%.*}-deb/issues)" >> "${readme}" ;;
+            *.backport|*.deviation)
+        printf "%s " "open [an issue](https://github.com/minos-org/${recipe%%.*}/issues)"     >> "${readme}" ;;
+        esac
+
+        printf "%s"  "with your comments." >> "${readme}"
+    fi
+
+    [ -d "${bdir}"/target/.git ] && (cd "${bdir}"/target && git add *) || \
+        (cd "${bdir}"/target && git init && git add * && \
+        git remote add origin "$(printf "%s" "${target}" | awk '{sub(/http:|https:/,"git:");print}')")
+    if ! (cd "${bdir}"/target && git status | grep -q "nothing to commit"); then
+        git commit -m "automatic sync $(date +%d-%m-%Y:%H:%M)"
+        git push -u origin master
+    fi
+EOF
+}
+
+_minos_sync()
+{
+    for recipe; do
+        [ ! -f "${recipe}" ] && { printf "file doesn't exist: ${recipe}, skipping...\\n"; continue; }
+        file="$(basename "${recipe}")"
+
+        case "${file}" in
+            *.upstream|*.backport|*.deviation) : ;;
+            *) printf \
+               "invalid filetype: ${file}, expected .upstream, .backport or .deviation, skipping...\\n"
+               continue ;;
+        esac
+
+        tmpdir="$(dirname "${recipe}")"/"${file}".tmp
+        [ -d "${tmpdir}" ] || mkdir "${tmpdir}"
+
+        _recipe_layout "${tmpdir}"/recipe.sh
+        sed -i "s:RECIPE:${recipe}:" "${tmpdir}"/recipe.sh
+
+        sh -xe "${tmpdir}"/recipe.sh > "${tmpdir}"/log 2>&1
+        if [ X"${?}" != X"0" ]; then
+            if command -v "mailgun" >/dev/null; then
+                for mail in ${alert_mails}; do
+                    mail="$(printf "%s\\n" "${mail}" | sed "s:#%#:@:")"
+                    mailgun --subject "autosync-bot: FAILED - ${file}" "${mail}" "$(
+                    printf "+---Trace-----------------------------\\n"
+                    cat    "${tmpdir}"/log | sed -e 's/^/| /g'
+                    printf "+-------------------------------------\\n"
+                    )"
+                done
+            fi
+            printf "%s\\n" "FAILED - ${file}"
+            printf "+---Trace-----------------------------\\n"
+            cat    "${tmpdir}"/log | sed -e 's/^/| /g'
+            printf "+-------------------------------------\\n"
+        fi
+    done
+}
+
+if [ -z "${@}" ]; then
+    _minos_sync $(find "${bdir}"/recipes -name "*.upstream"  -maxdepth 1 2>/dev/null);
+    _minos_sync $(find "${bdir}"/recipes -name "*.backport"  -maxdepth 1 2>/dev/null);
+    _minos_sync $(find "${bdir}"/recipes -name "*.deviation" -maxdepth 1 2>/dev/null);
+else
+    _minos_sync "${@}"
+fi
+
+# vim: set ts=8 sw=4 tw=0 ft=sh :

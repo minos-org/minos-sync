@@ -1,0 +1,8 @@
+#!/bin/sh
+set -ex
+
+rm -rf target/debian
+(cd source && git describe --tags --abbrev=0 > ../target/VERSION)
+(cd source && printf "%s" "$(git describe --tags --always) ($(git log --pretty=format:%cd --date=short -n1), branch \\\"$(git describe --tags --always --all | sed s:heads/::)\\\")" > ../target/I3_VERSION)
+
+# vim: set ts=8 sw=4 tw=0 ft=sh :

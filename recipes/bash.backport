@@ -1,0 +1,51 @@
+#source: lp:ubuntu/trusty-updates/bash
+#target: https://github.com/minos-org/bash-backport
+#description: trusty -> precise, required by minos-core-settings
+#exec: rm -rf target/debian/patches
+diff -x .bzr -x .git -x .pc -x patches -Naur source/debian/control target/debian/control
+--- source/debian/control	2015-03-01 14:25:27.748871000 +0300
++++ target/debian/control	2015-03-01 15:05:07.509362149 +0300
+@@ -1,7 +1,7 @@
+ Source: bash
+ Section: base
+ Priority: required
+-Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
++Maintainer: Javier Lopez <m@javier.io>
+ XSBC-Original-Maintainer: Matthias Klose <doko@debian.org>
+ Standards-Version: 3.9.5
+ Build-Depends: autoconf, autotools-dev, bison, libncurses5-dev,
+diff -x .bzr -x .git -x .pc -x patches -Naur source/debian/rules target/debian/rules
+--- source/debian/rules	2015-03-01 14:25:27.748871000 +0300
++++ target/debian/rules	2015-03-01 15:05:07.510362164 +0300
+@@ -273,31 +273,6 @@
+ 	dh_testdir
+ 	dh_testroot
+ 	mkdir -p $(d_doc)/usr/share/doc/$(p)
+-ifeq ($(with_gfdl),yes)
+-	dh_installdocs -p$(p_doc) 
+-	cp -p build-bash/doc/bashref.{html,pdf} $(d_doc)/usr/share/doc/$(p)/.
+-	mkdir -p $(d_doc)/usr/share/info
+-	cp -p build-bash/doc/bash.info $(d_doc)/usr/share/info/.
+-	dh_link -p$(p_doc) \
+-	    /usr/share/doc/$(p)/bashref.html /usr/share/doc/$(p_doc)/bashref.html \
+-	    /usr/share/doc/$(p)/bashref.pdf /usr/share/doc/$(p_doc)/bashref.pdf
+-else
+-	dh_installdocs -p$(p_doc) -X.doc-base
+-	rm -f $(d_doc)/usr/share/doc-base/bashref
+-endif
+-	rm -f $(d_doc)/usr/share/info/dir*
+-	cp -p build-bash/doc/bash.html build-bash/doc/bash.pdf \
+-	    $(d_doc)/usr/share/doc/$(p)/
+-	dh_link -p$(p_doc) \
+-	    /usr/share/doc/$(p)/bash.html /usr/share/doc/$(p_doc)/bash.html \
+-	    /usr/share/doc/$(p)/bash.pdf /usr/share/doc/$(p_doc)/bash.pdf
+-	dh_installchangelogs -p$(p_doc) CWRU/changelog
+-	dh_compress -p$(p_doc) -Xexamples -X.pdf
+-	dh_fixperms -p$(p_doc)
+-	dh_installdeb -p$(p_doc)
+-	dh_gencontrol -p$(p_doc)
+-	dh_md5sums -p$(p_doc)
+-	dh_builddeb -p$(p_doc)
+ 
+ binary-bash: bash-install debian/bash.preinst
+ 	dh_testdir
