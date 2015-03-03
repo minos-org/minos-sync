@@ -1,4 +1,4 @@
-#source: pull-lp-source libxcb trusty && mv libxcb-* source && rm -rf libxcb_*
+#source: pull-lp-source libxcb trusty && rm -rf source && mv libxcb-* source && rm -rf libxcb_*
 #target: https://github.com/minos-org/libxcb-backport
 #description: trusty -> precise, required by i3 >= 4.9
 diff -Naur source/debian/changelog target/debian/changelog
