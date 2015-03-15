@@ -12,6 +12,19 @@ _recipe_layout()
     bdir="$(cd "$(dirname "${0}")" && pwd)"
     recipe="$(basename "${bdir}" .tmp)"
     source="$(awk '/^#source/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
+    source_rev="${source##*:}"
+    case "${source_rev}" in
+        ''|*/*) : ;;
+        *) case "${source%%:*}" in
+              lp|https|http|git)
+                 source_rev="${source#*:}"
+                 source_rev="${source_rev#*:}"
+                 source="${source%:*}"
+                 ;;
+              *) source="${source%%:*}" ;;
+           esac
+            ;;
+    esac
     target="$(awk '/^#target/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
     target="$(printf "%s" "${target}"|awk '{sub(/http:|https:/,"git:");sub(/:\/\//,"@");sub(/github.com\//,"github.com:");print}')"
     description="$(awk '/^#description/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
@@ -24,6 +37,7 @@ _recipe_layout()
             else
                 (cd "${bdir}" && bzr branch "${source}" source)
             fi
+            [ "${source_rev}" ] && (cd "${bdir}"/source && bzr checkout "${source_rev}") || :
             ;;
         *github.com*)
             if [ -d "${bdir}"/source ]; then
@@ -31,6 +45,7 @@ _recipe_layout()
             else
                 (cd "${bdir}" && git clone "${source}" source)
             fi
+            [ "${source_rev}" ] && (cd "${bdir}"/source && git checkout "${source_rev}") || :
             ;;
         *)
             [ -z "${source}" ] && exit 1
