@@ -1,4 +1,4 @@
-#source: https://github.com/i3/i3
+#source: https://github.com/i3/i3:master
 #target: https://github.com/minos-org/i3
 #description: i3 stable
 #exec: i3.exec
