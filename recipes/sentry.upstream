@@ -1,0 +1,3 @@
+#source: rm -rf source && mkdir source && wget http://www.tnpi.net/internet/sentry.pl -O source/sentry.pl
+#target: https://github.com/minos-org/sentry
+#description: sentry latest
