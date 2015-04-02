@@ -1,0 +1,5 @@
+#source: git://git.2f30.org/morpheus
+#target: https://github.com/minos-org/morpheus-base
+#reason: 2f30.org is not realiable
+#description: README
+#exec: rm -rf target/ports target/mkbuild

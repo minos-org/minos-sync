@@ -1,0 +1,4 @@
+#source: git://git.2f30.org/ports
+#target: https://github.com/minos-org/morpheus-ports
+#reason: 2f30.org is not realiable
+#description: LICENSE
