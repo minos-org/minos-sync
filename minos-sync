@@ -14,7 +14,7 @@ _recipe_layout()
     source="$(awk '/^#source/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
     source_rev="${source##*:}"
     case "${source_rev}" in
-        ''|*/*) : ;;
+        ''|*/*) source_rev="" ;;
         *) case "${source%%:*}" in
               lp|https|http|git)
                  source_rev="${source#*:}"
@@ -39,7 +39,7 @@ _recipe_layout()
             fi
             [ "${source_rev}" ] && (cd "${bdir}"/source && bzr checkout "${source_rev}") || :
             ;;
-        *github.com*)
+        git:*|*github.com*)
             if [ -d "${bdir}"/source ]; then
                 (cd "${bdir}"/source && git pull)
             else
@@ -82,7 +82,7 @@ _recipe_layout()
     (cd "${bdir}" && awk '!/^#/' ../"${recipe}" > recipe.patch)
     (cd "${bdir}"/target/ && patch -p1 < ../recipe.patch)
 
-    if [ ! -f "${bdir}"/target/README.md ]; then
+    if [ ! -f "${bdir}/target/${description}" ] && [ ! -f "${bdir}"/target/README.md ]; then
         readme="${bdir}"/target/README.md
         printf "%s\\n" "## About"  > "${readme}"
         printf "\\n"              >> "${readme}"
