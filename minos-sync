@@ -29,6 +29,9 @@ _recipe_layout()
     target="$(printf "%s" "${target}"|awk '{sub(/http:|https:/,"git:");sub(/:\/\//,"@");sub(/github.com\//,"github.com:");print}')"
     description="$(awk '/^#description/ {print; exit}' RECIPE|cut -d":" -f2-|awk '{sub(/^[ \t]+/, ""); print}')"
     exe="$(awk '/^#exec/ {print; exit}' RECIPE|cut -d":" -f2|awk '{sub(/^[ \t]+/, ""); print}')"
+    patch="$(awk '!/^#/' RECIPE)"
+
+    [ -z "${description}" ] && [ -z "${exe}" ] && [ -z "${patch}" ] && bare="--bare"
 
     case "${source}" in
         lp:*)
@@ -41,9 +44,13 @@ _recipe_layout()
             ;;
         git:*|*github.com*)
             if [ -d "${bdir}"/source ]; then
-                (cd "${bdir}"/source && git pull)
+                if [ -z "${bare}" ]; then
+                    (cd "${bdir}"/source && git pull)
+                else
+                    (cd "${bdir}"/source && git fetch origin master:master)
+                fi
             else
-                (cd "${bdir}" && git clone "${source}" source)
+                (cd "${bdir}" && git clone "${bare}" "${source}" source)
             fi
             [ "${source_rev}" ] && (cd "${bdir}"/source && git checkout "${source_rev}") || :
             ;;
@@ -57,6 +64,8 @@ _recipe_layout()
             fi
             ;;
     esac
+
+    [ -z "${bare}" ] || { (cd "${bdir}"/source && git push --mirror "${target}"); exit "${?}"; }
 
     if [ -d "${bdir}"/target/.git ]; then
         (cd "${bdir}"/target && git pull)
@@ -79,7 +88,7 @@ _recipe_layout()
         (cd "${bdir}" && eval ${exe})
     fi
 
-    (cd "${bdir}" && awk '!/^#/' ../"${recipe}" > recipe.patch)
+    (cd "${bdir}" && printf "%s\\n" "${patch}" > recipe.patch)
     (cd "${bdir}"/target/ && patch -p1 < ../recipe.patch)
 
     if [ ! -f "${bdir}/target/${description}" ] && [ ! -f "${bdir}"/target/README.md ]; then
