@@ -2,6 +2,7 @@
 set -ex
 
 [ -d deb ] && (cd deb; git pull) || git clone git@github.com:minos-org/connman-deb deb
+rm -rf connman-*
 (cd deb && uscan --watchfile debian/watch --upstream-version 0.1 --destdir=../)
 for archive in $(find . -name "connman-*.tar.xz"); do
     xzcat < "${archive}" | tar xf -
