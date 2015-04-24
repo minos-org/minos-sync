@@ -50,7 +50,7 @@ _recipe_layout()
                     (cd "${bdir}"/source && git fetch origin master:master)
                 fi
             else
-                (cd "${bdir}" && git clone "${bare}" "${source}" source)
+                (cd "${bdir}" && git clone ${bare} "${source}" source)
             fi
             [ "${source_rev}" ] && (cd "${bdir}"/source && git checkout "${source_rev}") || :
             ;;
@@ -88,7 +88,7 @@ _recipe_layout()
         (cd "${bdir}" && eval ${exe})
     fi
 
-    (cd "${bdir}" && printf "%s\\n" "${patch}" > recipe.patch)
+    (cd "${bdir}" && awk '!/^#/' ../"${recipe}" > recipe.patch)
     (cd "${bdir}"/target/ && patch -p1 < ../recipe.patch)
 
     if [ ! -f "${bdir}/target/${description}" ] && [ ! -f "${bdir}"/target/README.md ]; then
