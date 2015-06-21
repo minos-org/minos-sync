@@ -1,0 +1,46 @@
+---
+- hosts: minos-sync
+
+  # only update if the cache hasn't been modified since the last 12 hours.
+  pre_tasks:
+    - name: Update apt cache
+      apt:  update_cache=yes cache_valid_time=43200
+
+  tasks:
+
+    - name: Install apt-cache to speed-up further apt commands
+      apt:  pkg=squid-deb-proxy-client state=installed install_recommends=no
+
+    - name: Install minos-sync dependencies
+      apt: name={{item}} state=installed install_recommends=no
+      with_items:
+        - git
+        - bzr
+        - patch
+        - file
+        - curl
+
+    - name: Get mailgun script
+      get_url: url=https://raw.githubusercontent.com/chilicuil/learn/master/sh/tools/mailgun dest=/usr/bin/mailgun validate_certs=no
+
+    - name: Chmod +x mailgun
+      file: path=/usr/bin/mailgun mode=0755
+
+    - name: Ensure admin user exists
+      user: name=admin
+
+    - name: Get minos-sync git repository
+      shell: git clone --depth=1 https://github.com/minos-org/minos-sync /home/admin/minos-sync
+      args:
+            creates: /home/admin/minos-sync
+
+    - name: Add minos-sync cronjob
+      #every midnight
+      cron: name="minos-sync" minute="0" hour="0"
+            user="admin" job="~/minos-sync/minos-sync" state=present
+
+    - name: Set appropiate permitions to the minos-sync directory
+      file: path=/home/admin/minos-sync state=directory owner=admin group=admin recurse=yes
+
+    - name: mailgun api
+      pause: prompt="Make sure to add a valid mailgun API to /etc/mailgun and valid SSH keys for connecting to github/launchpad"
