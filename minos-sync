@@ -5,8 +5,7 @@ progname="$(basename ${0})"
 bdir="$(cd "$(dirname "${0}")" && pwd)"
 alert_mails="m#%#javier.io"
 
-_recipe_layout()
-{
+_recipe_layout() {
     [ -z "${1}" ] && return 1
     cat > "${1}" << 'EOF'
     bdir="$(cd "$(dirname "${0}")" && pwd)"
@@ -176,8 +175,7 @@ _recipe_layout()
 EOF
 }
 
-_minos_sync()
-{
+_minos_sync() {
     for recipe; do
         [ ! -f "${recipe}" ] && { printf "file doesn't exist: ${recipe}, skipping...\\n"; continue; }
         file="$(basename "${recipe}")"
