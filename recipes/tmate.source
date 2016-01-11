@@ -1,0 +1,22 @@
+#!/bin/sh
+set -ex
+
+[ -d deb ] && (cd deb; git pull) || git clone git@github.com:minos-org/tmate-deb deb
+rm -rf tmate.stable tmate.stable.log
+
+(
+    cd deb
+    for i in 1 2 3; do #sometimes github timeouts
+        uscan --verbose --watchfile debian/watch --upstream-version 0.1 --destdir=../ > ../tmate.stable.log && break || :
+        sleep 1m
+    done
+)
+
+latest="$(awk 'c&&!--c; /matching hrefs:/{c=1}' tmate.stable.log 2>/dev/null)"
+[ -z "${latest}" ] && exit 1 || latest="${latest##*/}"
+
+rm -rf tmate.stable && mkdir tmate.stable
+tar -zxf "${latest}" -C ./tmate.stable && rm -rf source
+mv tmate.stable/* source/
+
+# vim: set ts=8 sw=4 tw=0 ft=sh :
