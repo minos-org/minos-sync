@@ -1,0 +1,4 @@
+#source: https://github.com/minos-org/tmate-deb
+#target: https://github.com/minos-org/tmate-nightly-deb
+#description: slightly modified packaging for tmate nightly
+#exec: tmate-nightly-deb.exec

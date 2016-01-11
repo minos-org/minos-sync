@@ -1,0 +1,3 @@
+sed -i 's/^tmate /tmate-nightly /'   target/debian/changelog
+sed -i 's/: tmate$/: tmate-nightly/' target/debian/control
+sed -i 's/Conflicts: tmate-nightly/Conflicts: tmate/g' target/debian/control
