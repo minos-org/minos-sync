@@ -1,0 +1,3 @@
+#source: https://github.com/tmate-io/tmate-ppa
+#target: https://github.com/minos-org/tmate-deb
+#description: 24 hours delayed mirror
