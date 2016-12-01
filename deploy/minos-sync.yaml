@@ -20,6 +20,7 @@
         - file
         - curl
         - devscripts
+        - ubuntu-dev-tools
 
     - name: Get mailgun script
       get_url: url=https://raw.githubusercontent.com/chilicuil/learn/master/sh/tools/mailgun dest=/usr/bin/mailgun validate_certs=no
