@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 set -ex
+export PS4='>>(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
 
 [ -d deb ] && (cd deb; git pull) || git clone git@github.com:tmate-io/tmate-ppa deb
 rm -rf tmate.stable tmate.stable.log
@@ -12,7 +13,7 @@ rm -rf tmate.stable tmate.stable.log
     done
 )
 
-latest="$(awk 'c&&!--c; /matching hrefs:/{c=1}' tmate.stable.log 2>/dev/null)"
+latest="$(awk 'c&&!--c; /matching hrefs/{c=1}' tmate.stable.log 2>/dev/null | awk '{print $1}')"
 [ -z "${latest}" ] && exit 1 || latest="${latest##*/}"
 
 rm -rf tmate.stable && mkdir tmate.stable
