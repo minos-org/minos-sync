@@ -1,0 +1,4 @@
+Usage
+-----
+
+    ansible-playbook -i hosts ./minos-sync.yaml -vvvv --sudo --ask-sudo
