@@ -1,4 +1,4 @@
 #source: https://github.com/eurogiciel-oss/connman-json-client
-#target: https://github.com/chilicuil/connman-json-client-deb
+#target: https://github.com/javier-lopez/connman-json-client-deb
 #description: debian/ upstream
 #exec: rm -rf target/* && cp -rf source/packaging/debian target && ln -s debian/README.source target/README.md
