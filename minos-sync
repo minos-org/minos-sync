@@ -213,6 +213,8 @@ _minos_sync() {
     done
 }
 
+( cd "${bdir}" && git pull )
+
 if [ -z "${@}" ]; then
     _minos_sync $(find "${bdir}"/recipes -name "*.upstream"  -maxdepth 1 2>/dev/null);
     _minos_sync $(find "${bdir}"/recipes -name "*.backport"  -maxdepth 1 2>/dev/null);
