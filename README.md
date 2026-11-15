@@ -12,4 +12,6 @@ Only a handful of these repositories are maintained actively at minos, the rest 
 - backport dependency packages. To keep up with minos changes equally from all LTS releases.
 - minos deviation, little changes who are injected automatically to take advantage of upstream (Ubuntu) security updates.
 
-The recipes are run by [minos-sync-bot](https://github.com/minos-sync-bot) and uploaded once every day.
+The recipes were run by [minos-sync-bot](https://github.com/minos-sync-bot) once every day. The bot is retired:
+it has written to no mirror since January 2023, nothing minos publishes follows a mirror any more, and every
+recipe is `.disabled`. The mirrors stay as they were. `launchpad` drives the recipes and imports on Launchpad.

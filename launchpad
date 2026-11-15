@@ -1,0 +1,495 @@
+#!/usr/bin/env python3
+"""The PPA's recipes and code imports on Launchpad, brought in line with the -deb repositories.
+
+Each -deb repository keeps a copy of its recipe in debian/lp-recipe; Launchpad holds the live one. This
+reads Launchpad without credentials and prints what it would change. It changes Launchpad only with
+--apply, one step per run, after printing the same list; the credentials are read only then.
+
+usage: launchpad [status]                         the recipes: format, series, last build, the branches
+                                                  they read and whether each has a git import yet
+       launchpad imports [--apply]                a git import for every branch a recipe reads, from the
+                                                  same url its bzr import used (the bzr ones are all
+                                                  suspended: no recipe sees a new commit today)
+       launchpad recipes [--apply]                every recipe rewritten as a git recipe, from its
+                                                  debian/lp-recipe when there is one
+       launchpad series [--add S,..] [--drop S,..] [--apply]
+                                                  the series of the recipes bench/sources builds, the
+                                                  only ones tested on a new release
+       launchpad retire NAME... [--apply]         delete those recipes and ask for the deletion of the
+                                                  sources they published in the PPA
+       launchpad refresh [NAME...] [--apply]      ask every git import a recipe with series reads (or those
+                                                  named) to fetch GitHub now, instead of at its next turn;
+                                                  NAME: a recipe (every branch it reads) or a branch. Each
+                                                  import is shown with the commit Launchpad has against
+                                                  the one GitHub has: without --apply, the way to check
+                                                  that the imports caught up
+       launchpad build [NAME...] [--series S,..] [--apply]
+                                                  request a build of every recipe with series (or of
+                                                  those named) for each of its series (or of those
+                                                  given), but where one is already pending; warns when
+                                                  a branch it reads is imported behind GitHub
+       launchpad daily [--off] [--apply]          turn on (or off) the daily build of every recipe with
+                                                  series: Launchpad then builds a recipe once a day when
+                                                  a branch it reads has changed, with no build verb
+       launchpad import NAME URL [--apply]        a git import ~minos-archive/minos/+git/NAME of the git
+                                                  repository at URL, for a repository no recipe reads yet
+       launchpad recipe NAME S,.. FILE [--apply]  the recipe NAME from the recipe text in FILE, for those
+                                                  series, building daily into the PPA; created, or
+                                                  rewritten where it differs
+
+The credentials: ~/.config/launchpad/minos-launchpad.cred (launchpadlib's own file; never printed).
+"""
+import os
+import re
+import subprocess
+import sys
+
+from launchpadlib.launchpad import Launchpad
+from lazr.restfulclient.errors import HTTPError, MethodNotAllowed
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+CREDENTIALS = os.path.expanduser("~/.config/launchpad/minos-launchpad.cred")
+TEAM, PROJECT, PPA = "minos-archive", "minos", "main"
+PREFIX = f"lp:~{TEAM}/{PROJECT}/"
+#Ubuntu's own git of a source package: a recipe starts from it to patch Ubuntu's package (packaging.md)
+UBUNTU = "lp:ubuntu/+source/"
+
+#branches a recipe reads that never had a bzr import, so there is no url to take from Launchpad
+NEW_IMPORTS = {"i3lock-color": "https://github.com/Raymo111/i3lock-color"}
+#a base read at a fixed commit instead of the tip of its default branch: minos ships i3 4.12-35, the
+#mirror went on to 4.22 (repos.md). The recipe pins it, the mirror stays a plain mirror
+PINS = {"i3": "4c715505c3e570fc4e06361a260ec0bf73ed9540"}
+#recipes the bench builds that still take no new series: it builds them to test the old releases only
+NO_NEW_SERIES = {"tmux": "the archive's tmux is newer than minos' 2.8 on every supported release"}
+
+
+def login(apply):
+    if not apply:
+        return Launchpad.login_anonymously("minos-launchpad", "production", version="devel")
+    if not os.path.exists(CREDENTIALS):
+        sys.exit(f"no credentials at {CREDENTIALS}")
+    return Launchpad.login_with("minos-launchpad", "production", version="devel", credentials_file=CREDENTIALS)
+
+
+def branches_of(text):
+    """the names of the branches of this project a recipe reads, in order"""
+    return re.findall(re.escape(PREFIX) + r"(?:\+git/)?([^\s]+)", text)
+
+
+def reads_of(text):
+    """(branch name, revision) of each branch of this project a recipe reads; None: its default branch"""
+    found = []
+    for line in text.strip().split("\n")[1:]:
+        f = line.split()
+        if not f or f[0].startswith("#"):
+            continue
+        if f[0] in ("nest", "nest-part", "merge"):
+            last = {"nest": 5, "nest-part": 6, "merge": 4}[f[0]]
+            u, rev = f[2], (f[-1] if len(f) == last else None)
+        else:  #the base branch
+            u, rev = f[0], (f[1] if len(f) == 2 else None)
+        m = re.match(re.escape(PREFIX) + r"(?:\+git/)?(\S+)$", u)
+        if m:
+            found.append((m.group(1), rev))
+    return found
+
+
+def github_sha(url, ref):
+    """the commit ref points to at url, asked anonymously; None when git cannot tell"""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    try:
+        out = subprocess.run(["git", "-c", "credential.helper=", "ls-remote", url, ref], env=env,
+                             capture_output=True, text=True, timeout=60).stdout
+    except subprocess.TimeoutExpired:
+        return None
+    lines = [line.split("\t") for line in out.split("\n") if line]
+    return next((sha for sha, name in lines if name == ref), None)
+
+
+def to_git(text):
+    """a bzr-builder recipe as a git-build-recipe one; (text, problems)"""
+    lines = [line for line in text.strip().split("\n") if line.strip()]
+    problems = []
+    head = re.match(r"#\s*(?:bzr-builder|git-build-recipe) format [\d.]+ (deb-version .*)$", lines[0])
+    if not head:
+        return text, [f"unknown header: {lines[0]}"]
+    out = ["# git-build-recipe format 0.4 " + head.group(1)]
+
+    def url(u):
+        if u.startswith(UBUNTU):
+            return u
+        if not u.startswith(PREFIX):
+            problems.append(f"reads a branch outside {PREFIX}: {u}")
+            return u
+        return PREFIX + "+git/" + u[len(PREFIX):].replace("+git/", "")
+
+    def rev(r):
+        if r.startswith("tag:"):
+            return r[len("tag:"):]  #git rev-parse takes a tag by its name
+        if r.startswith("revno:"):
+            problems.append(f"a bzr revision number means nothing in git: {r}")
+        return r
+
+    for i, line in enumerate(lines[1:], 1):
+        f = line.split()
+        if f[0] in ("nest", "nest-part", "merge"):
+            f[2] = url(f[2])
+            last = {"nest": 5, "nest-part": 6, "merge": 4}[f[0]]
+            if len(f) == last:
+                f[-1] = rev(f[-1])
+        else:  #the base branch
+            name = f[0][len(PREFIX):] if f[0].startswith(PREFIX) else ""
+            f[0] = url(f[0])
+            if len(f) == 2:
+                f[1] = rev(f[1])
+            elif name in PINS:
+                f.append(PINS[name])
+        out.append(" ".join(f))
+    return "\n".join(out) + "\n", problems
+
+
+def local_recipes():
+    """{-deb branch name: (directory, recipe text)} from every debian/lp-recipe beside minos-sync"""
+    found = {}
+    for d in sorted(os.listdir(ROOT)):
+        path = os.path.join(ROOT, d, "debian", "lp-recipe")
+        if os.path.isfile(path):
+            text = open(path).read()
+            for name in branches_of(text):
+                if name.endswith("-deb"):
+                    found[name] = (d, text)
+    return found
+
+
+def bench_sources():
+    """the -deb repositories bench/sources builds and tests"""
+    path = os.path.join(ROOT, "bench", "sources")
+    return {f.split()[1] for f in open(path) if f.split() and not f.startswith("#")}
+
+
+def series_of(recipe):
+    """the names of the series a recipe builds for: the API gives them as links"""
+    return sorted(str(s).rstrip("/").rsplit("/", 1)[-1] for s in recipe.distroseries)
+
+
+def deb_branch(text):
+    names = [n for n in branches_of(text) if n.endswith("-deb")]
+    return names[0] if names else None
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--apply"]
+    apply = "--apply" in sys.argv[1:]
+    verb = args.pop(0) if args else "status"
+    lp = login(apply)
+    team, project = lp.people[TEAM], lp.projects[PROJECT]
+    ubuntu = lp.distributions["ubuntu"]
+    recipes = sorted(team.recipes, key=lambda r: r.name)
+    local = local_recipes()
+
+    def git_repository(name):
+        return lp.git_repositories.getByPath(path=f"~{TEAM}/{PROJECT}/+git/{name}")
+
+    def import_url(name):
+        branch = lp.branches.getByUrl(url=PREFIX + name)
+        if branch is not None and branch.code_import is not None:
+            #the author's old GitHub name belongs to someone else since 2025: never import from it
+            return branch.code_import.url.replace("github.com/chilicuil/", "github.com/javier-lopez/")
+        return NEW_IMPORTS.get(name)
+
+    states = {}
+
+    def import_state(name, rev):
+        """(imported commit, GitHub commit, current|behind|pinned...) of a branch as a recipe reads it"""
+        if (name, rev) not in states:
+            states[name, rev] = compare(name, rev)
+        return states[name, rev]
+
+    def compare(name, rev):
+        if name in PINS:
+            return None, None, "pinned"
+        repo = git_repository(name)
+        if repo is None or repo.code_import is None:
+            return None, None, "no git import"
+        path = f"refs/heads/{rev}" if rev else repo.default_branch
+        ref = repo.getRefByPath(path=path) if path else None
+        if ref is None:  #a tag or a commit: the recipe reads a fixed revision
+            return None, None, f"pinned at {rev}" if rev else "no default branch"
+        github = github_sha(repo.code_import.url, path if rev else "HEAD")
+        if github is None:
+            return ref.commit_sha1, None, "github unknown"
+        return ref.commit_sha1, github, "current" if github == ref.commit_sha1 else "behind"
+
+    def desired(recipe):
+        deb = deb_branch(recipe.recipe_text)
+        source = local.get(deb)
+        return to_git(source[1] if source else recipe.recipe_text) + ((source[0] if source else None),)
+
+    if verb == "status":
+        for r in recipes:
+            series = " ".join(series_of(r))
+            fmt = "git" if "git-build-recipe" in r.recipe_text else "bzr"
+            last = r.last_build
+            built = f"{last.buildstate} {str(last.datebuilt or '')[:10]}" if last else "never built"
+            names = branches_of(r.recipe_text)
+            git = sum(1 for n in names if git_repository(n) is not None)
+            print(f"{r.name:<34} {fmt}  series: {series or '-':<30} last: {built:<32} git imports {git}/{len(names)}")
+        return 0
+
+    if verb == "imports":
+        wanted = []
+        for r in recipes:
+            text, _, _ = desired(r)
+            wanted += branches_of(text)
+        todo = []
+        for name in sorted(set(wanted)):
+            if git_repository(name) is not None:
+                continue
+            u = import_url(name)
+            todo.append((name, u))
+            print(f"new git import  ~{TEAM}/{PROJECT}/+git/{name:<34} from {u or 'NO URL KNOWN'}")
+        print(f"{len(todo)} git imports to create")
+        if apply:
+            for name, u in todo:
+                if not u:
+                    print(f"skipped {name}: no url")
+                    continue
+                project.newCodeImport(branch_name=name, rcs_type="Git", target_rcs_type="Git", url=u, owner=team)
+                print(f"created {name}")
+        return 0
+
+    if verb == "recipes":
+        todo = []
+        for r in recipes:
+            text, problems, source = desired(r)
+            if problems:
+                print(f"{r.name}: left as it is: {'; '.join(problems)}")
+                continue
+            missing = [n for n in branches_of(text) if git_repository(n) is None]
+            if text.strip() == r.recipe_text.strip():
+                continue
+            todo.append((r, text))
+            print(f"== {r.name}  (from {source + '/debian/lp-recipe' if source else 'its live text'})"
+                  + (f"  [waits for the git import of: {' '.join(missing)}]" if missing else ""))
+            for line in r.recipe_text.strip().split("\n"):
+                print(f"   - {line}")
+            for line in text.strip().split("\n"):
+                print(f"   + {line}")
+        print(f"{len(todo)} recipes to rewrite")
+        if apply:
+            for r, text in todo:
+                if any(git_repository(n) is None for n in branches_of(text)):
+                    print(f"skipped {r.name}: a git import it reads does not exist yet (run: launchpad imports)")
+                    continue
+                r.recipe_text = text
+                r.lp_save()
+                print(f"rewritten {r.name}")
+        return 0
+
+    if verb == "series":
+        opts = dict(zip(args[0::2], args[1::2]))
+        add = [s for s in opts.get("--add", "").split(",") if s]
+        drop = [s for s in opts.get("--drop", "").split(",") if s]
+        tested = bench_sources()
+        todo = []
+        for r in recipes:
+            deb = deb_branch(r.recipe_text)
+            source = local.get(deb)
+            now = series_of(r)
+            if source and source[0] in tested and r.name not in NO_NEW_SERIES:
+                new = sorted((set(now) - set(drop)) | set(add))
+            else:  #not built by the bench: no new series; old ones still go
+                new = sorted(set(now) - set(drop))
+            if new != now:
+                todo.append((r, new))
+                print(f"{r.name:<34} {' '.join(now) or '-':<30} -> {' '.join(new) or 'NONE (it would build nothing)'}")
+        print(f"{len(todo)} recipes change their series")
+        if apply:
+            for r, new in todo:
+                r.distroseries = [ubuntu.getSeries(name_or_version=s).self_link for s in new]
+                r.lp_save()
+                print(f"series set on {r.name}")
+        return 0
+
+    if verb == "retire":
+        archive = team.getPPAByName(name=PPA)
+        by_name = {r.name: r for r in recipes}
+        todo = []
+        for name in args:
+            r = by_name.get(name)
+            if r is None:
+                print(f"{name}: no recipe of that name")
+                continue
+            #the source package a recipe builds is the Source: of its debian/control
+            source = local.get(deb_branch(r.recipe_text))
+            control = os.path.join(ROOT, source[0], "debian", "control") if source else ""
+            sources = set(re.findall(r"^Source:\s*(\S+)", open(control).read(), re.M)) if control else set()
+            if not sources:
+                print(f"{name}: no local debian/control to name its source package, its publications are left")
+            pubs = [p for s in sorted(sources) for p in archive.getPublishedSources(source_name=s, exact_match=True, status="Published")]
+            todo.append((r, pubs))
+            print(f"retire recipe {name}; its published sources: "
+                  + (", ".join(f"{p.source_package_name} {p.source_package_version} ({p.distro_series_link.rsplit('/', 1)[-1]})" for p in pubs) or "none"))
+        if apply:
+            for r, pubs in todo:
+                for p in pubs:
+                    p.requestDeletion(removal_comment="retired from minos: no supported release can build or use it")
+                #the API does not delete a recipe (405): it is left building for no series, and the owner
+                #deletes it on the web
+                try:
+                    r.lp_delete()
+                    print(f"retired {r.name}")
+                except MethodNotAllowed:
+                    try:
+                        r.distroseries = []
+                        r.lp_save()
+                        left = "set to build for no series"
+                    except HTTPError as e:
+                        left = f"left with its series ({e.response.status})"
+                    print(f"retired {r.name}: {len(pubs)} publications deleted; the recipe is {left}, delete it at "
+                          f"https://code.launchpad.net/~{TEAM}/+recipe/{r.name}/+delete")
+        return 0
+
+    if verb == "refresh":
+        reads = sorted({(n, rev or "") for r in recipes if series_of(r) for n, rev in reads_of(r.recipe_text)
+                        if not args or n in args or r.name in args})
+        todo = []
+        for name, rev in reads:
+            repo = git_repository(name)
+            if repo is None or repo.code_import is None:
+                print(f"{name}: no git import")
+                continue
+            ci = repo.code_import
+            if name not in [n for n, _ in todo]:
+                todo.append((name, ci))
+            imported, github, state = import_state(name, rev or None)
+            label = f"{name} {rev[:7] if re.fullmatch(r'[0-9a-f]{40}', rev) else rev}".strip()
+            print(f"refresh {label:<36} imported {(imported or '-')[:7]:<7}  "
+                  f"github {(github or '-')[:7]:<7}  {state:<8}  "
+                  f"last imported {str(ci.date_last_successful or 'never')[:16]}")
+        print(f"{len(todo)} imports to refresh")
+        if apply:
+            for name, ci in todo:
+                try:
+                    ci.requestImport()
+                    print(f"requested {name}")
+                except HTTPError as e:
+                    #an import already running or queued answers 400: it fetches anyway
+                    print(f"{name}: {e.response.status} {e.content.decode(errors='replace')[:120]}")
+        return 0
+
+    if verb == "daily":
+        want = "--off" not in args
+        todo = [r for r in recipes if series_of(r) and bool(r.build_daily) != want]
+        for r in todo:
+            print(f"daily {'on ' if want else 'off'} {r.name}")
+        print(f"{len(todo)} recipes change their daily build")
+        if apply:
+            for r in todo:
+                r.build_daily = want
+                r.lp_save()
+                print(f"daily build {'on' if want else 'off'}: {r.name}")
+        return 0
+
+    if verb == "build":
+        archive = team.getPPAByName(name=PPA)
+        #--series retries one series, as when a single build failed for a reason outside minos (a timeout fetching a branch)
+        only = set()
+        if "--series" in args:
+            i = args.index("--series")
+            only = set(args[i + 1].split(",")) if i + 1 < len(args) else set()
+            del args[i:i + 2]
+            if not only:
+                sys.exit("build: --series needs S,..")
+        chosen = [r for r in recipes if series_of(r) and (not args or r.name in args)]
+        #a build reads what Launchpad imported: an import behind GitHub builds the old code
+        for r in chosen:
+            for name, rev in reads_of(r.recipe_text):
+                imported, github, state = import_state(name, rev)
+                if state == "behind":
+                    print(f"warning: {r.name} reads {name} imported at {imported[:7]}, GitHub has {github[:7]}: "
+                          f"run launchpad refresh {r.name} first")
+        todo = []
+        for r in chosen:
+            pending = {str(b.distro_series_link).rstrip("/").rsplit("/", 1)[-1] for b in r.pending_builds}
+            for s in series_of(r):
+                if only and s not in only:
+                    continue
+                if s in pending:
+                    print(f"{r.name:<34} {s:<9} already pending")
+                    continue
+                todo.append((r, s))
+                print(f"build {r.name:<28} {s}")
+        print(f"{len(todo)} builds to request")
+        if apply:
+            for r, s in todo:
+                try:
+                    r.requestBuild(archive=archive, distroseries=ubuntu.getSeries(name_or_version=s), pocket="Release")
+                    print(f"requested {r.name} {s}")
+                except HTTPError as e:
+                    print(f"{r.name} {s}: {e.response.status} {e.content.decode(errors='replace')[:160]}")
+        return 0
+
+    if verb == "import":
+        if len(args) != 2:
+            sys.exit("import: needs NAME URL")
+        name, u = args
+        if git_repository(name) is not None:
+            print(f"~{TEAM}/{PROJECT}/+git/{name} exists already")
+            return 0
+        print(f"new git import  ~{TEAM}/{PROJECT}/+git/{name:<34} from {u}")
+        if apply:
+            project.newCodeImport(branch_name=name, rcs_type="Git", target_rcs_type="Git", url=u, owner=team)
+            print(f"created {name}")
+        return 0
+
+    if verb == "recipe":
+        if len(args) != 3:
+            sys.exit("recipe: needs NAME S,.. FILE")
+        name, series, text = args[0], sorted(s for s in args[1].split(",") if s), open(args[2]).read().strip() + "\n"
+        missing = [n for n in branches_of(text) if git_repository(n) is None]
+        if missing:
+            sys.exit(f"recipe {name}: no git import of {' '.join(missing)} yet (run: launchpad import)")
+        archive = team.getPPAByName(name=PPA)
+        r = {r.name: r for r in recipes}.get(name)
+        if r is None:
+            print(f"== new recipe {name}  series: {' '.join(series)}  daily build into ppa:{TEAM}/{PPA}")
+            for line in text.strip().split("\n"):
+                print(f"   + {line}")
+        else:
+            changes = []
+            if text.strip() != r.recipe_text.strip():
+                changes += [f"   - {line}" for line in r.recipe_text.strip().split("\n")]
+                changes += [f"   + {line}" for line in text.strip().split("\n")]
+            if series != series_of(r):
+                changes.append(f"   series {' '.join(series_of(r)) or '-'} -> {' '.join(series)}")
+            if not r.build_daily or r.daily_build_archive_link != archive.self_link:
+                changes.append(f"   daily build into ppa:{TEAM}/{PPA}")
+            if not changes:
+                print(f"{name}: as it should be")
+                return 0
+            print(f"== {name}")
+            print("\n".join(changes))
+        if apply:
+            links = [ubuntu.getSeries(name_or_version=s).self_link for s in series]
+            if r is None:
+                #a recipe's description is required: it names the branches it reads
+                read = " and ".join(t for t in text.split() if t.startswith("lp:"))
+                team.createRecipe(name=name, description=f"Built from {read}", recipe_text=text,
+                                  distroseries=links, daily_build_archive=archive, build_daily=True)
+                print(f"created {name}")
+            else:
+                r.recipe_text, r.distroseries = text, links
+                r.daily_build_archive, r.build_daily = archive, True
+                r.lp_save()
+                print(f"rewritten {name}")
+        return 0
+
+    sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+# vim: set ts=8 sw=4 tw=0 ft=python :
